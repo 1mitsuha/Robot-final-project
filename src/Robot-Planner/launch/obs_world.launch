@@ -1,0 +1,52 @@
+<launch>
+  <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
+  <arg name="x_pos" default="0.0"/>
+  <arg name="y_pos" default="0.0"/>
+  <arg name="z_pos" default="0.0"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <param name="pgm_path" value="$(find turtle)/maps/gazebo_map.pgm" />
+  <param name="yaml_path" value="$(find turtle)/maps/gazebo_map.yaml" />
+
+  <!-- 障碍物生成：等 Gazebo 就绪后启动（延迟 15 秒） -->
+  <node
+    name="spawn_obstacles_node"
+    pkg="random_map_generator"
+    type="spawn_obstacles.py"
+    output="screen"
+    launch-prefix="bash -c 'sleep 15; $0 $@'" />
+
+  <rosparam>
+    obstacle_count: 20
+    x_range: [-10, 10]
+    y_range: [-10, 10]
+  </rosparam>
+
+  <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro" />
+
+  <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf"  args="-urdf -model turtlebot3_$(arg model) -x $(arg x_pos) -y $(arg y_pos) -z $(arg z_pos) -param robot_description" />
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+      respawn="false" output="screen">
+    <remap from="/joint_states" to="/gazebo/joint_states"/>
+  </node>
+
+  <!-- 地图服务：等障碍物全部生成后再加载（延迟 60 秒） -->
+  <node pkg="map_server" type="map_server" name="map_server"
+    args="$(find turtle)/maps/gazebo_map.yaml"
+    launch-prefix="bash -c 'sleep 60; $0 $@'"  />
+
+  <arg name="map_file" default="$(find turtle)/maps/gazebo_map.yaml"/>
+  <node pkg="turtle" name="planner" type="planner.py" args="$(arg map_file)" output="screen" />
+  <node pkg="turtle" name="controller" type="controller.py" output="screen" />
+
+  <node name="rviz" pkg="rviz" type="rviz"
+        args="-d $(find random_map_generator)/final.rviz" />
+</launch>

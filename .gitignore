@@ -1,0 +1,25 @@
+# ROS build artifacts
+build/
+devel/
+install/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# ROS logs
+*.log
+
+# Generated maps (recreated at runtime)
+src/Robot-Planner/maps/gazebo_map.pgm
+src/Robot-Planner/maps/gazebo_map.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
