@@ -38,10 +38,10 @@
     <remap from="/joint_states" to="/gazebo/joint_states"/>
   </node>
 
-  <!-- 地图服务：等障碍物全部生成后再加载（延迟 60 秒） -->
+  <!-- 地图服务：等障碍物全部生成后再加载（延迟 30 秒） -->
   <node pkg="map_server" type="map_server" name="map_server"
     args="$(find turtle)/maps/gazebo_map.yaml"
-    launch-prefix="bash -c 'sleep 60; $0 $@'"  />
+    launch-prefix="bash -c 'sleep 30; $0 $@'"  />
 
   <arg name="map_file" default="$(find turtle)/maps/gazebo_map.yaml"/>
   <node pkg="turtle" name="planner" type="planner.py" args="$(arg map_file)" output="screen" />

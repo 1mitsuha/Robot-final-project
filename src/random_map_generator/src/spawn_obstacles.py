@@ -46,9 +46,9 @@ class ObstacleGenerator:
 
             x = random.uniform(-8, 8)
             y = random.uniform(-8, 8)
-            size_x = random.uniform(0.5, 3.0)
-            size_y = random.uniform(0.5, 3.0)
-            size_z = random.uniform(0.5, 2.0)
+            size_x = random.uniform(0.4, 2.0)
+            size_y = random.uniform(0.4, 2.0)
+            size_z = random.uniform(0.5, 1.5)
             half_x = size_x / 2
             half_y = size_y / 2
 
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     node.loginfo("pgm_path=%s, yaml_path=%s", ppgm, pyaml)
 
     obstacle_gen = ObstacleGenerator(node)
-    obstacle_gen.generate_in_gazebo(num_obstacles=15)
+    obstacle_gen.generate_in_gazebo(num_obstacles=12)
 
     map_gen = PGMMapGenerator()
     for obs in obstacle_gen.obstacles:

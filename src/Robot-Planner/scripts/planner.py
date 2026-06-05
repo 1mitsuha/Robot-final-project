@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ros_compat import (
     CompatNode, spin, wait_for_message,
-    Point, PoseStamped, OccupancyGrid, Path,
+    Point, PoseStamped, OccupancyGrid, Odometry, Path,
     Float32MultiArray, Marker, MarkerArray,
 )
 from utils import calc_distance
@@ -115,6 +115,7 @@ class RRTStarPlanner:
         self.start = None
         self.goal = None
         self.nodes = []
+        self.robot_pos = Point(x=0.0, y=0.0, z=0.0)
 
         self.vis_path_pub = node.create_publisher(Path, '/rrt_path', queue_size=10)
         self.ctrl_path_pub = node.create_publisher(Float32MultiArray, '/path', queue_size=10)
@@ -122,6 +123,8 @@ class RRTStarPlanner:
         # Subscribe to both ROS1 and ROS2 goal topics
         node.create_subscriber(PoseStamped, '/move_base_simple/goal', self.goal_callback)
         node.create_subscriber(PoseStamped, '/goal_pose', self.goal_callback)
+        # Track robot position for replanning
+        node.create_subscriber(Odometry, '/odom', self.odom_callback)
 
         node.loginfo("Waiting for /map ...")
         wait_for_message('/map', OccupancyGrid, node=node)
@@ -134,11 +137,33 @@ class RRTStarPlanner:
             self.cost = 0.0 if parent is None else parent.cost + math.hypot(
                 point.x - parent.point.x, point.y - parent.point.y)
 
+    def odom_callback(self, msg):
+        self.robot_pos = msg.pose.pose.position
+
     def goal_callback(self, msg):
         self.goal = msg.pose.position
         if self.mp.map_info is not None:
-            self.start = Point(x=0.0, y=0.0, z=0.0)
-            self.plan_path()
+            # Use robot's actual position as start (not hardcoded origin)
+            self.start = Point(x=self.robot_pos.x, y=self.robot_pos.y, z=0.0)
+            self.node.loginfo("Planning from (%.2f, %.2f) to (%.2f, %.2f)",
+                              self.start.x, self.start.y, self.goal.x, self.goal.y)
+
+            # Check if start or goal is inside an obstacle
+            if self.mp.is_collision(self.start, self.start):
+                self.node.logerr("Start position is inside an obstacle!")
+                return
+            if self.mp.is_collision(self.goal, self.goal):
+                self.node.logerr("Goal is inside or too close to an obstacle! Pick a different goal.")
+                return
+
+            # Single attempt with enough iterations (faster than 3 retries)
+            ok = self.plan_path()
+            if not ok:
+                # Fallback: try once more with reduced inflation
+                self.node.logwarn("First attempt failed, retrying with reduced margin...")
+                self.mp._inflate_obstacles(inflation_cells=4)
+                ok = self.plan_path()
+                self.mp._inflate_obstacles(inflation_cells=5)  # restore
 
     def _nearest_neighbor(self, target):
         tx = target[0] if isinstance(target, tuple) else target.x
@@ -209,13 +234,13 @@ class RRTStarPlanner:
     def plan_path(self):
         if self.mp.map_data is None:
             self.node.logerr("No map data available")
-            return
+            return False
 
         start_time = self.node.now()
         self.nodes = [self.Node(self.start)]
 
-        max_iter = 5000
-        goal_sample_rate = 0.15
+        max_iter = 12000
+        goal_sample_rate = 0.25
         step_size = 0.8
         goal_tolerance = 0.3
 
@@ -223,14 +248,28 @@ class RRTStarPlanner:
         best_goal_cost = float('inf')
         first_solution_iter = -1
 
+        # Sampling domain: bounding box of start->goal + generous margin
+        sx, sy = self.start.x, self.start.y
+        gx, gy = self.goal.x, self.goal.y
+        x_min = min(sx, gx) - 4.0
+        x_max = max(sx, gx) + 4.0
+        y_min = min(sy, gy) - 4.0
+        y_max = max(sy, gy) + 4.0
+
         for i in range(max_iter):
-            # Sampling
-            if i < 50:
-                sample = (random.uniform(-3, 3), random.uniform(-3, 3))
+            # ---- Smart adaptive sampling ----
+            if i < 40:
+                # Bootstrap: dense near actual start position
+                sample = (random.uniform(sx - 2, sx + 2),
+                          random.uniform(sy - 2, sy + 2))
+            elif i < 100:
+                # Dense near goal
+                sample = (random.uniform(gx - 2, gx + 2),
+                          random.uniform(gy - 2, gy + 2))
             elif random.random() < goal_sample_rate:
-                sample = (self.goal.x, self.goal.y)
+                sample = (gx, gy)
             else:
-                sample = (random.uniform(-10, 10), random.uniform(-10, 10))
+                sample = (random.uniform(x_min, x_max), random.uniform(y_min, y_max))
 
             # Nearest neighbor
             nearest_idx = self._nearest_neighbor(sample)
@@ -243,10 +282,10 @@ class RRTStarPlanner:
             if self.mp.is_collision(nearest.point, new_point):
                 continue
 
-            # Dynamic search radius
+            # Dynamic search radius (RRT*)
             n = len(self.nodes)
             if n > 2:
-                search_radius = min(step_size * 2.0, 15.0 * math.sqrt(math.log(n) / n))
+                search_radius = min(step_size * 2.5, 20.0 * math.sqrt(math.log(n) / max(n, 2)))
             else:
                 search_radius = step_size * 2.0
 
@@ -282,7 +321,7 @@ class RRTStarPlanner:
                         candidate.cost = new_node.cost + edge_cost
 
             # Check goal reachability
-            dist_to_goal = math.hypot(new_point.x - self.goal.x, new_point.y - self.goal.y)
+            dist_to_goal = math.hypot(new_point.x - gx, new_point.y - gy)
             if dist_to_goal < goal_tolerance:
                 if not self.mp.is_collision(new_point, self.goal):
                     total_cost = new_node.cost + dist_to_goal
@@ -296,7 +335,7 @@ class RRTStarPlanner:
 
             # Early stop
             if goal_node is not None and first_solution_iter >= 0:
-                if i > first_solution_iter + 500:
+                if i > first_solution_iter + 300:
                     self.node.loginfo("Early stop at iteration %d", i)
                     break
 
@@ -306,11 +345,12 @@ class RRTStarPlanner:
             self._smooth_path(goal_node)
             self.publish_path(goal_node)
             path_length = goal_node.cost
-            self.node.loginfo("RRT* completed in %.3fs | Path length: %.2fm | Tree size: %d nodes",
+            self.node.loginfo("RRT* done in %.3fs | Path: %.2fm | Tree: %d nodes",
                               elapsed, path_length, len(self.nodes))
+            return True
         else:
-            self.node.logerr("RRT* failed to find path after %d iterations (%.3fs)",
-                             max_iter, elapsed)
+            self.node.logerr("RRT* failed after %d iters (%.3fs)", max_iter, elapsed)
+            return False
 
     def publish_path(self, goal_node):
         vis_path = Path()
