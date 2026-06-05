@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
-import rospy
-import numpy as np
+import sys
 import math
 import random
-from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped, Point
-from visualization_msgs.msg import Marker, MarkerArray
-from std_msgs.msg import Float32MultiArray
+import numpy as np
+
+# Add this directory to path so ros_compat can be imported
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ros_compat import (
+    CompatNode, spin, wait_for_message,
+    Point, PoseStamped, OccupancyGrid, Path,
+    Float32MultiArray, Marker, MarkerArray,
+)
 from utils import calc_distance
 
 
 class MapProcessor:
-    def __init__(self):
+    def __init__(self, node):
+        self.node = node
         self.map_data = None
         self.map_info = None
         self.obstacles = []
-        rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
+        node.create_subscriber(OccupancyGrid, '/map', self.map_callback)
 
     def map_callback(self, msg):
         self.map_data = np.array(msg.data).reshape((msg.info.height, msg.info.width))
         self.map_info = msg.info
         self.extract_obstacles()
         self._inflate_obstacles(inflation_cells=5)
-        rospy.loginfo("Map loaded with resolution %.3f at origin (%.2f, %.2f)" % (
+        self.node.loginfo("Map loaded with resolution %.3f at origin (%.2f, %.2f)" % (
             self.map_info.resolution,
             self.map_info.origin.position.x,
             self.map_info.origin.position.y))
@@ -102,19 +109,23 @@ class MapProcessor:
 
 
 class RRTStarPlanner:
-    def __init__(self):
-        self.mp = MapProcessor()
+    def __init__(self, node):
+        self.node = node
+        self.mp = MapProcessor(node)
         self.start = None
         self.goal = None
         self.nodes = []
 
-        self.vis_path_pub = rospy.Publisher('/rrt_path', Path, queue_size=10)
-        self.ctrl_path_pub = rospy.Publisher('/path', Float32MultiArray, queue_size=10)
-        self.tree_pub = rospy.Publisher('/rrt_tree', MarkerArray, queue_size=10)
-        rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.goal_callback)
+        self.vis_path_pub = node.create_publisher(Path, '/rrt_path', queue_size=10)
+        self.ctrl_path_pub = node.create_publisher(Float32MultiArray, '/path', queue_size=10)
+        self.tree_pub = node.create_publisher(MarkerArray, '/rrt_tree', queue_size=10)
+        # Subscribe to both ROS1 and ROS2 goal topics
+        node.create_subscriber(PoseStamped, '/move_base_simple/goal', self.goal_callback)
+        node.create_subscriber(PoseStamped, '/goal_pose', self.goal_callback)
 
-        rospy.wait_for_message('/map', OccupancyGrid)
-        rospy.loginfo("Planner initialized, waiting for goal...")
+        node.loginfo("Waiting for /map ...")
+        wait_for_message('/map', OccupancyGrid, node=node)
+        node.loginfo("Planner initialized, waiting for goal...")
 
     class Node:
         def __init__(self, point, parent=None):
@@ -126,7 +137,7 @@ class RRTStarPlanner:
     def goal_callback(self, msg):
         self.goal = msg.pose.position
         if self.mp.map_info is not None:
-            self.start = Point(0, 0, 0)
+            self.start = Point(x=0.0, y=0.0, z=0.0)
             self.plan_path()
 
     def _nearest_neighbor(self, target):
@@ -148,9 +159,9 @@ class RRTStarPlanner:
         dy = ty - from_point.y
         dist = math.hypot(dx, dy)
         if dist <= step_size:
-            return Point(tx, ty, 0)
+            return Point(x=tx, y=ty, z=0.0)
         ratio = step_size / dist
-        return Point(from_point.x + dx * ratio, from_point.y + dy * ratio, 0)
+        return Point(x=from_point.x + dx * ratio, y=from_point.y + dy * ratio, z=0.0)
 
     def _nearby_nodes(self, point, radius):
         indices = []
@@ -192,15 +203,15 @@ class RRTStarPlanner:
             smoothed.append(waypoints[best_j])
             i = best_j
 
-        rospy.loginfo("Path smoothed: %d -> %d waypoints", len(waypoints), len(smoothed))
+        self.node.loginfo("Path smoothed: %d -> %d waypoints", len(waypoints), len(smoothed))
         return goal_node
 
     def plan_path(self):
         if self.mp.map_data is None:
-            rospy.logerr("No map data available")
+            self.node.logerr("No map data available")
             return
 
-        start_time = rospy.Time.now()
+        start_time = self.node.now()
         self.nodes = [self.Node(self.start)]
 
         max_iter = 5000
@@ -281,30 +292,30 @@ class RRTStarPlanner:
                         goal_node.cost = total_cost
                         if first_solution_iter < 0:
                             first_solution_iter = i
-                            rospy.loginfo("First path found at iteration %d, optimizing...", i)
+                            self.node.loginfo("First path found at iteration %d, optimizing...", i)
 
             # Early stop
             if goal_node is not None and first_solution_iter >= 0:
                 if i > first_solution_iter + 500:
-                    rospy.loginfo("Early stop at iteration %d", i)
+                    self.node.loginfo("Early stop at iteration %d", i)
                     break
 
-        elapsed = (rospy.Time.now() - start_time).to_sec()
+        elapsed = self.node.time_diff_sec(self.node.now(), start_time)
 
         if goal_node is not None:
             self._smooth_path(goal_node)
             self.publish_path(goal_node)
             path_length = goal_node.cost
-            rospy.loginfo("RRT* completed in %.3fs | Path length: %.2fm | Tree size: %d nodes",
-                          elapsed, path_length, len(self.nodes))
+            self.node.loginfo("RRT* completed in %.3fs | Path length: %.2fm | Tree size: %d nodes",
+                              elapsed, path_length, len(self.nodes))
         else:
-            rospy.logerr("RRT* failed to find path after %d iterations (%.3fs)",
-                         max_iter, elapsed)
+            self.node.logerr("RRT* failed to find path after %d iterations (%.3fs)",
+                             max_iter, elapsed)
 
     def publish_path(self, goal_node):
         vis_path = Path()
         vis_path.header.frame_id = "map"
-        vis_path.header.stamp = rospy.Time.now()
+        self.node.stamp_header(vis_path.header)
 
         ctrl_path = Float32MultiArray()
         path_points = []
@@ -327,8 +338,8 @@ class RRTStarPlanner:
 
         self.vis_path_pub.publish(vis_path)
         self.ctrl_path_pub.publish(ctrl_path)
-        rospy.loginfo("Published path: %d waypoints (visual), %d (control)",
-                      len(vis_path.poses), len(path_points))
+        self.node.loginfo("Published path: %d waypoints (visual), %d (control)",
+                          len(vis_path.poses), len(path_points))
 
         self.publish_tree()
 
@@ -336,7 +347,7 @@ class RRTStarPlanner:
         marker_array = MarkerArray()
         marker = Marker()
         marker.header.frame_id = "map"
-        marker.header.stamp = rospy.Time.now()
+        self.node.stamp_header(marker.header)
         marker.ns = "rrt_tree"
         marker.id = 0
         marker.type = Marker.LINE_LIST
@@ -357,6 +368,6 @@ class RRTStarPlanner:
 
 
 if __name__ == '__main__':
-    rospy.init_node('rrt_star_planner')
-    planner = RRTStarPlanner()
-    rospy.spin()
+    node = CompatNode('rrt_star_planner')
+    planner = RRTStarPlanner(node)
+    spin(node)

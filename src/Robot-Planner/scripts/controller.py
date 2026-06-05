@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-import rospy
-from std_msgs.msg import Float32MultiArray
+import sys
 import math
-from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ros_compat import (
+    CompatNode, spin,
+    Twist, Float32MultiArray, Odometry,
+)
 from utils import calc_distance, normalize_angle_deg
 
 
@@ -47,7 +51,8 @@ class PIDController:
 
 
 class Controller:
-    def __init__(self):
+    def __init__(self, node):
+        self.node = node
         self.path = []
         self.current_pos = (0, 0)
         self.current_orient = 0
@@ -59,9 +64,9 @@ class Controller:
         self.angular_pid = PIDController(kp=1.2, ki=0.02, kd=0.04,
                                          output_min=-2.0, output_max=2.0)
 
-        self.sub_odom = rospy.Subscriber('/odom', Odometry, self.get_pos)
-        self.sub_path = rospy.Subscriber('/path', Float32MultiArray, self.path_callback)
-        self.pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
+        self.sub_odom = node.create_subscriber(Odometry, '/odom', self.get_pos)
+        self.sub_path = node.create_subscriber(Float32MultiArray, '/path', self.path_callback)
+        self.pub = node.create_publisher(Twist, 'cmd_vel', queue_size=10)
 
     def get_pos(self, data):
         self.current_pos = (data.pose.pose.position.x,
@@ -82,11 +87,11 @@ class Controller:
         self.path = path_nodes
         self.new_path_received = True
         self.active = True
-        rospy.loginfo("New path: %d waypoints", len(path_nodes))
+        self.node.loginfo("New path: %d waypoints", len(path_nodes))
 
     def run(self):
-        rate = rospy.Rate(50)
-        rospy.loginfo("Controller ready, waiting for path...")
+        rate = self.node.create_rate(50)
+        self.node.loginfo("Controller ready, waiting for path...")
 
         point_idx = 0
         prev_pos = self.current_pos
@@ -94,16 +99,17 @@ class Controller:
         prev_angular = 0.0
         max_lin_accel = 0.8
         max_ang_accel = 3.0
-        last_time = rospy.Time.now()
+        last_time = self.node.now()
         stall_count = 0
         recovering = False
         recovery_step = 0
 
-        while not rospy.is_shutdown():
-            dt = (rospy.Time.now() - last_time).to_sec()
+        while CompatNode.ok():
+            now = self.node.now()
+            dt = self.node.time_diff_sec(now, last_time)
             if dt > 0.2:
                 dt = 0.02
-            last_time = rospy.Time.now()
+            last_time = now
 
             # New path received — restart tracking from beginning
             if self.new_path_received:
@@ -115,7 +121,7 @@ class Controller:
                 recovery_step = 0
                 self.linear_pid.reset()
                 self.angular_pid.reset()
-                rospy.loginfo("Starting new path: %d waypoints", len(self.path))
+                self.node.loginfo("Starting new path: %d waypoints", len(self.path))
 
             # No path yet
             if not self.path or not self.active:
@@ -127,7 +133,7 @@ class Controller:
             if point_idx >= len(self.path):
                 self.pub.publish(Twist())
                 self.active = False
-                rospy.loginfo("Goal reached")
+                self.node.loginfo("Goal reached")
                 continue
 
             target = self.path[point_idx]
@@ -143,7 +149,7 @@ class Controller:
             if is_final and dist_to_target < goal_threshold:
                 self.pub.publish(Twist())
                 self.active = False
-                rospy.loginfo("Final waypoint reached")
+                self.node.loginfo("Final waypoint reached")
                 continue
             elif not is_final and dist_to_target < wp_threshold:
                 point_idx += 1
@@ -170,7 +176,7 @@ class Controller:
 
             # Recovery: if stuck for >2s, back up and reorient
             if stall_count > 100 and not recovering:
-                rospy.logwarn("Stuck detected! Recovering...")
+                self.node.logwarn("Stuck detected! Recovering...")
                 recovering = True
                 recovery_step = 0
 
@@ -189,7 +195,7 @@ class Controller:
                     prev_pos = self.current_pos
                     self.linear_pid.reset()
                     self.angular_pid.reset()
-                    rospy.loginfo("Recovery complete")
+                    self.node.loginfo("Recovery complete")
                 recovery_step += 1
                 self.pub.publish(move_cmd)
                 prev_linear = 0.0
@@ -226,6 +232,6 @@ class Controller:
 
 
 if __name__ == '__main__':
-    rospy.init_node('controller', anonymous=True)
-    ctrl = Controller()
+    node = CompatNode('controller', anonymous=True)
+    ctrl = Controller(node)
     ctrl.run()
