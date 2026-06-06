@@ -52,6 +52,7 @@ def generate_launch_description():
         name='spawn_obstacles_node',
         output='screen',
         parameters=[{
+            'use_sim_time': True,
             'pgm_path': os.path.join(turtle_share, 'maps', 'gazebo_map.pgm'),
             'yaml_path': os.path.join(turtle_share, 'maps', 'gazebo_map.yaml'),
             'obstacle_count': 20,
@@ -72,6 +73,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='map_to_odom_tf',
         arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        parameters=[{'use_sim_time': True}],
     )
 
     # 4. Map publisher — starts immediately, waits internally for PGM+YAML to be ready
@@ -82,6 +84,7 @@ def generate_launch_description():
         name='map_publisher',
         output='screen',
         parameters=[{
+            'use_sim_time': True,
             'yaml_filename': os.path.join(turtle_share, 'maps', 'gazebo_map.yaml'),
         }],
     )
@@ -92,6 +95,7 @@ def generate_launch_description():
         executable='planner.py',
         name='planner',
         output='screen',
+        parameters=[{'use_sim_time': True}],
     )
 
     # 6. Controller (PID)
@@ -100,6 +104,7 @@ def generate_launch_description():
         executable='controller.py',
         name='controller',
         output='screen',
+        parameters=[{'use_sim_time': True}],
     )
 
     # 7. RViz2
@@ -108,6 +113,7 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
+        parameters=[{'use_sim_time': True}],
     )
 
     return LaunchDescription([
