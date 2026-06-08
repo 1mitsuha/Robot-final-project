@@ -28,16 +28,17 @@ if(DEFINED ENV{ROS_VERSION} AND "$ENV{ROS_VERSION}" STREQUAL "2")
     DESTINATION share/${PROJECT_NAME}/launch
   )
 
-  # Install RViz config
+  # Install RViz configs (final.rviz for ROS1 compat, final_ros2.rviz for RViz2)
   install(FILES
     final.rviz
+    final_ros2.rviz
     DESTINATION share/${PROJECT_NAME}
   )
 
   ament_package()
 
 else()
-  # ===================== ROS1 build =====================
+  # ===================== ROS1 build (pure catkin, no ament_cmake) =====================
   find_package(catkin REQUIRED COMPONENTS
     gazebo_msgs
     rospy
@@ -59,6 +60,17 @@ else()
   catkin_install_python(PROGRAMS
     src/spawn_obstacles.py src/ros_compat.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+
+  # Install launch and RViz config for colcon discovery
+  install(DIRECTORY
+    launch/
+    DESTINATION share/${PROJECT_NAME}/launch
+  )
+  install(FILES
+    final.rviz
+    final_ros2.rviz
+    DESTINATION share/${PROJECT_NAME}
   )
 
 endif()

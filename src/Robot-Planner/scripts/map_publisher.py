@@ -45,15 +45,22 @@ class MapPublisher:
             pgm_path = os.path.join(os.path.dirname(yaml_path),
                                     os.path.basename(pgm_path))
 
-        node.loginfo("Loading PGM: %s", pgm_path)
+        node.loginfo("Waiting for fresh PGM: %s", pgm_path)
 
-        # Wait for PGM too
-        while not os.path.exists(pgm_path) and CompatNode.ok():
-            time.sleep(1)
+        # Record initial mtime — wait for spawn_obstacles to UPDATE the file
+        initial_mtime = os.path.getmtime(pgm_path) if os.path.exists(pgm_path) else 0
+        while CompatNode.ok():
+            if os.path.exists(pgm_path) and os.path.getmtime(pgm_path) > initial_mtime:
+                break
+            node.loginfo("PGM not updated yet, retrying in 2s...")
+            time.sleep(2)
 
         # Load PGM image
         img = Image.open(pgm_path)
         map_data = np.array(img).astype(np.int8)
+
+        # Flip Y: PGM has row 0 at top, OccupancyGrid has row 0 at bottom
+        map_data = np.flipud(map_data)
 
         # Convert to ROS OccupancyGrid values (0=free, 100=occupied, -1=unknown)
         occ_data = np.where(map_data == 0, 100, 0).flatten().tolist()
@@ -71,7 +78,7 @@ class MapPublisher:
         self.map_msg.data = occ_data
 
         # Publish at 2 Hz
-        self.pub = node.create_publisher(OccupancyGrid, '/map', queue_size=1)
+        self.pub = node.create_publisher(OccupancyGrid, '/map', queue_size=1, transient_local=True)
         self.timer = node.create_timer(0.5, self.publish_map)
         node.loginfo("Map published: %dx%d @ %.2f m/px — waiting for goal...",
                      img.width, img.height, resolution)

@@ -10,8 +10,9 @@
   <maintainer email="sysuceo@todo.todo">sysuceo</maintainer>
   <license>MIT</license>
 
-  <!-- Build tool: ament_cmake for colcon. catkin_make discovers packages by convention. -->
+  <!-- Build tool: ament_cmake (ROS2) + catkin (ROS1). Colcon uses <export><build_type>. -->
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>catkin</buildtool_depend>
 
   <!-- Dependencies available on BOTH ROS1 and ROS2 -->
   <depend>gazebo_msgs</depend>
@@ -22,6 +23,5 @@
   <!--   ROS2: rclcpp    (find_package in ament branch) -->
 
   <export>
-    <build_type>ament_cmake</build_type>
   </export>
 </package>

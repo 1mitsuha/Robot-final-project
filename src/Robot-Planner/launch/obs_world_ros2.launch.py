@@ -9,7 +9,7 @@ Key differences from ROS1:
   - Map uses nav2_map_server instead of map_server
 
 Usage:
-    ros2 launch turtle obs_world_ros2.launch.py
+    ros2 launch Robot-Planner obs_world_ros2.launch.py
 """
 
 import os
@@ -33,7 +33,8 @@ def generate_launch_description():
     model = LaunchConfiguration('model')
 
     turtlebot3_gazebo_share = get_package_share_directory('turtlebot3_gazebo')
-    turtle_share = get_package_share_directory('turtle')
+    robot_planner_share = get_package_share_directory('Robot-Planner')
+    random_map_share = get_package_share_directory('random_map_generator')
 
     # 1. Gazebo empty world (includes: gzserver, gzclient, robot_state_publisher, spawn_turtlebot3)
     gazebo_launch = IncludeLaunchDescription(
@@ -53,8 +54,8 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': True,
-            'pgm_path': os.path.join(turtle_share, 'maps', 'gazebo_map.pgm'),
-            'yaml_path': os.path.join(turtle_share, 'maps', 'gazebo_map.yaml'),
+            'pgm_path': os.path.join(robot_planner_share, 'maps', 'gazebo_map.pgm'),
+            'yaml_path': os.path.join(robot_planner_share, 'maps', 'gazebo_map.yaml'),
             'obstacle_count': 20,
             'x_range': [-10, 10],
             'y_range': [-10, 10],
@@ -79,19 +80,19 @@ def generate_launch_description():
     # 4. Map publisher — starts immediately, waits internally for PGM+YAML to be ready
     #    Uses our simple publisher instead of nav2_map_server (which needs lifecycle activation)
     map_publisher_node = Node(
-        package='turtle',
+        package='Robot-Planner',
         executable='map_publisher.py',
         name='map_publisher',
         output='screen',
         parameters=[{
             'use_sim_time': True,
-            'yaml_filename': os.path.join(turtle_share, 'maps', 'gazebo_map.yaml'),
+            'yaml_filename': os.path.join(robot_planner_share, 'maps', 'gazebo_map.yaml'),
         }],
     )
 
     # 5. Planner (RRT*)
     planner_node = Node(
-        package='turtle',
+        package='Robot-Planner',
         executable='planner.py',
         name='planner',
         output='screen',
@@ -100,19 +101,20 @@ def generate_launch_description():
 
     # 6. Controller (PID)
     controller_node = Node(
-        package='turtle',
+        package='Robot-Planner',
         executable='controller.py',
         name='controller',
         output='screen',
         parameters=[{'use_sim_time': True}],
     )
 
-    # 7. RViz2
+    # 7. RViz2 — pre-configured with Map, Path, Tree, RobotModel, LaserScan
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         output='screen',
+        arguments=['-d', os.path.join(random_map_share, 'final_ros2.rviz')],
         parameters=[{'use_sim_time': True}],
     )
 

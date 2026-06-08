@@ -13,7 +13,7 @@
 ```
 final_project/                         # ROS 工作空间
 ├── src/
-│   ├── Robot-Planner/                 # 核心功能包（包名: turtle）
+│   ├── Robot-Planner/                 # 核心功能包
 │   │   ├── scripts/
 │   │   │   ├── planner.py             # RRT* 全局路径规划器
 │   │   │   ├── controller.py          # PID 轨迹跟踪控制器
@@ -59,6 +59,85 @@ final_project/                         # ROS 工作空间
 
 ---
 
+## Docker 环境（推荐：Ubuntu 22.04 / 24.04 用户）
+
+ROS Noetic 最高只支持 Ubuntu 20.04。如果你使用 Ubuntu 22.04 或更高版本，可通过 Docker 容器运行完整 ROS 环境。
+
+### 构建镜像
+
+```bash
+# 构建 ROS Noetic Full 镜像（约 7 GB，首次需 10-30 分钟）
+cd docker
+bash build.sh
+```
+
+镜像已预装 `ros-noetic-desktop-full`、Gazebo 11、TurtleBot3 仿真及所有依赖。
+
+### 启动容器
+
+```bash
+# 允许 Docker 访问 X11 图形界面
+xhost +local:docker
+
+# 启动容器（src 目录自动挂载到 ~/catkin_ws/src）
+bash docker/run.sh
+
+# 或手动启动
+sudo docker run -it --rm \
+    -e DISPLAY=$DISPLAY \
+    -e QT_X11_NO_MITSHM=1 \
+    -e TURTLEBOT3_MODEL=waffle \
+    -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+    -v $(pwd)/src:/home/rosuser/catkin_ws/src \
+    --network host \
+    ros-noetic:full
+```
+
+### 容器内编译与运行
+
+```bash
+# 进入容器后，先安装缺失的依赖（首次启动需要）
+sudo apt update && sudo apt install -y python3-catkin-tools ros-noetic-map-server
+
+cd ~/catkin_ws
+
+# 编译
+catkin build
+```
+
+编译成功后，每次启动容器都需要 **同时 source 两个 setup 文件**：
+
+```bash
+source /opt/ros/noetic/setup.bash   # ROS 基础环境
+source ~/catkin_ws/devel/setup.bash # 你的工作空间（Robot-Planner, random_map_generator）
+
+export TURTLEBOT3_MODEL=waffle
+
+# 启动仿真
+roslaunch Robot-Planner obs_world.launch
+```
+
+> ⚠️ **重要**：两个 `source` 缺一不可。忘记 `source devel/setup.bash` 会导致 `[obs_world.launch] is neither a launch file...` 错误。忘记 `source /opt/ros/noetic/setup.bash` 会导致 `roslaunch: command not found`。
+
+### Docker Hub 镜像加速（国内用户）
+
+如果 `docker build` 无法拉取 `ubuntu:20.04`，需配置镜像加速器：
+
+```bash
+sudo tee /etc/docker/daemon.json << 'EOF'
+{
+    "registry-mirrors": [
+        "https://docker.m.daocloud.io",
+        "https://dockerproxy.com",
+        "https://docker.mirrors.ustc.edu.cn"
+    ]
+}
+EOF
+sudo systemctl restart docker
+```
+
+---
+
 ## 安装依赖
 
 ### ROS1 (Noetic)
@@ -69,8 +148,14 @@ sudo apt install ros-noetic-desktop-full
 
 # TurtleBot3 仿真包
 sudo apt install ros-noetic-turtlebot3 ros-noetic-turtlebot3-simulations
+sudo apt install ros-noetic-turtlebot3-msgs ros-noetic-turtlebot3-gazebo
 sudo apt install ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control
-sudo apt install ros-noetic-map-server ros-noetic-navigation ros-noetic-rviz
+
+# 必备工具包（map_server 为规划器提供地图，xacro 解析 URDF）
+sudo apt install ros-noetic-map-server ros-noetic-xacro
+sudo apt install ros-noetic-navigation ros-noetic-rviz ros-noetic-robot-state-publisher
+
+# 构建工具与 Python 依赖
 sudo apt install python3-pip python-is-python3 python3-catkin-tools
 pip3 install numpy pillow pyyaml
 ```
@@ -102,15 +187,19 @@ source /opt/ros/noetic/setup.bash
 
 # 2. 安装依赖
 cd final_project
-rosdep install -i --from-path src --rosdistro noetic -y
+sudo apt update && sudo apt install -y python3-catkin-tools ros-noetic-map-server
 
-# 3. 编译（使用 catkin_tools，与 colcon 结构兼容）
+# 3. 编译（必须用 catkin build，不能用 catkin_make）
 catkin build
 source devel/setup.bash
 
 # 4. 启动仿真
-roslaunch turtle obs_world.launch
+roslaunch Robot-Planner obs_world.launch
 ```
+
+> **注意**：`package.xml` 的 `<build_type>` 为 `ament_cmake`（ROS2/colcon 要求）。  
+> ROS1 编译必须使用 `catkin build`（catkin_tools）—— **`catkin_make` 不支持**。  
+> 若使用 Docker 容器，`catkin_tools` 已预装，可直接 `catkin build`。
 
 ### ROS2 (Humble)
 
@@ -128,7 +217,7 @@ colcon build --symlink-install
 source install/setup.bash
 
 # 4. 启动仿真
-ros2 launch turtle obs_world_ros2.launch.py
+ros2 launch Robot-Planner obs_world_ros2.launch.py
 ```
 
 启动后（两种 ROS 版本操作相同）：
@@ -203,35 +292,35 @@ spin(node)
 
 | 特性 | 实现 |
 |------|------|
-| 采样策略 | 前50次起点附近密集采样 + 15%目标偏向 |
+| 采样策略 | 自适应：前40次起点附近 + 40-100次目标附近 + 25%目标偏向 |
 | 步长 | 0.8m 固定步长 |
-| 碰撞检测 | Bresenham 直线光栅化（障碍物膨胀 0.5m） |
+| 碰撞检测 | Bresenham 直线光栅化（障碍物膨胀 5 cells） |
 | 最近邻搜索 | 线性遍历 O(N) |
-| 重连（Rewiring） | 动态搜索半径 `min(1.6, 15*sqrt(log(n)/n))` |
+| 重连（Rewiring） | 动态搜索半径 `min(2.0, 20*sqrt(log(n)/n))` |
 | 路径平滑 | 贪心 LOS 剪枝（最大段长 ≤1.5m） |
-| 早停 | 首次找到路径 + 500 次优化迭代 |
-| 最大迭代 | 5000 |
+| 早停 | 首次找到路径 + 300 次优化迭代 |
+| 最大迭代 | 12000 |
 
 ### PID 轨迹跟踪控制（controller.py）
 
 | 特性 | 实现 |
 |------|------|
-| 架构 | 双通道独立 PID（线速度 + 角速度） |
+| 架构 | 双通道独立 PID（线速度 + 角速度）+ Pure Pursuit 前馈 |
 | 控制频率 | 50 Hz |
-| 最大线速度 | 0.60 m/s |
-| 最大角速度 | 2.0 rad/s |
-| 自适应速度 | `线速度 × cos(航向误差)` 动态调节 |
+| 最大线速度 | 0.80 m/s |
+| 最大角速度 | 1.2 rad/s |
+| 自适应速度 | `线速度 × cos(航向误差)` 动态调节 + 近目标减速 |
 | 抗积分饱和 | 积分项钳位 + 路径点切换时复位 |
-| 加速度限制 | 线 0.8 m/s²，角 3.0 rad/s² |
-| 卡住恢复 | 检测 2 秒无位移 → 后退 → 旋转 → 重试 |
+| 加速度限制 | 线 1.2 m/s²，角 5.0 rad/s² |
+| 卡住恢复 | 检测 2 秒无位移 → 后退 → 转向 → 前进 |
 | 多目标 | Subscriber 持续监听，新路径自动中断旧路径 |
 
 ### PID 参数
 
 | 通道 | Kp | Ki | Kd | 输出范围 |
 |------|-----|-----|-----|---------|
-| 线速度 | 0.6 | 0.01 | 0.02 | [0, 0.60] m/s |
-| 角速度 | 1.2 | 0.02 | 0.04 | [-2.0, 2.0] rad/s |
+| 线速度 | 0.5 | 0.02 | 0.02 | [0, 0.80] m/s |
+| 角速度 | 0.35 | 0.005 | 0.03 | [-1.2, 1.2] rad/s |
 
 ---
 
@@ -287,16 +376,21 @@ spin(node)
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
+| `catkin_make` 报 `non-catkin packages` | package.xml `<build_type>` 是 `ament_cmake`，catkin_make 不支持 | 改用 `catkin build`（需 `python3-catkin-tools`） |
+| `catkin build` 报 `catkin: command not found` | 未安装 `catkin_tools` | `sudo apt install python3-catkin-tools` |
+| `roslaunch` 报 `is neither a launch file...` | 忘记 `source devel/setup.bash` | 确保同时 source 两个文件：`source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash` |
+| `roslaunch` 报 `command not found` | 忘记 `source /opt/ros/noetic/setup.bash` | `source /opt/ros/noetic/setup.bash` |
+| 报 `TURTLEBOT3_MODEL is not set` | 未设置 TurtleBot3 型号 | `export TURTLEBOT3_MODEL=waffle` |
+| 报 `turtlebot3_description` 找不到 | TurtleBot3 仿真包未安装 | `sudo apt install ros-noetic-turtlebot3 ros-noetic-turtlebot3-simulations ros-noetic-turtlebot3-gazebo` |
 | `colcon build` 报 `find_package(catkin)` 失败 | colcon 尝试编译 `src/` 下的 turtlebot3 ROS1 源码包 | 每个子包已放置 `COLCON_IGNORE`，colcon 自动跳过。确认：`find src -name COLCON_IGNORE` |
-| `catkin build` 报 `catkin：未找到命令` | 未安装 `catkin_tools` | `sudo apt install python3-catkin-tools` |
-| `colcon build` 报 `src/CMakeLists.txt` 语法错误 | `src/` 下有 catkin toplevel.cmake 残留 | `rm src/CMakeLists.txt` |
 | `colcon build` 报 `can't find .../maps/` | `maps/` 目录在源码中不存在（运行时动态生成） | `mkdir -p src/Robot-Planner/maps && touch src/Robot-Planner/maps/.gitkeep` |
-| 启动时 `planner.py not found` | Python 脚本缺少执行权限 (`--symlink-install` 保留源码权限) | `chmod +x src/Robot-Planner/scripts/*.py src/random_map_generator/src/*.py` |
-| `rosdep install` 报找不到 `rospy` / `rclpy` | `package.xml` 中有版本特定依赖 | 已修复：`package.xml` 只列双平台共有的依赖 |
+| 启动时报 `cannot launch node of type [map_server/map_server]` | `ros-noetic-map-server` 未安装 | `sudo apt install ros-noetic-map-server` |
+| 启动后有 Gazebo/RViz 界面，但机器人不动 | map_server 未运行或规划器未收到地图，导致 `/path` 无数据 | 确认 `map_server` 已安装；终端查看是否有 `Map loaded` 日志；用 `rostopic echo /path` 检查路径 |
 | RViz 显示 `Unknown frame map` | map_server 未就绪 | 等待终端出现 `Map loaded...` 后刷新 |
-| 机器人不动 | controller 未收到路径 | ROS1: `rostopic echo /path` ; ROS2: `ros2 topic echo /path` |
 | 机器人卡在障碍物旁 | 膨胀距离不够或物理碰撞 | 增大 `inflation_cells` 至 7 |
+| 点击目标点后无反应 | 目标点可能位于障碍物内或不可达 | 终端查看是否有 `Goal is inside obstacle` 日志，换一个无障碍区域点击 |
 | Gazebo 闪退 | 显存不足或进程残留 | `killall gzserver gzclient` 后重试 |
+| Docker 构建时 `connection reset by peer` | Docker Hub 在国内被墙 | 配置镜像加速器（见上方 Docker 章节） |
 
 ---
 

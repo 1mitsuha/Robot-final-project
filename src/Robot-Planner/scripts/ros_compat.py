@@ -197,11 +197,20 @@ class CompatNode:
             rospy.sleep(duration_sec)
 
     # -- publishers / subscribers -------------------------------------------
-    def create_publisher(self, msg_type, topic, queue_size=10):
+    def create_publisher(self, msg_type, topic, queue_size=10, transient_local=False):
         if _ROS2:
-            return self._node.create_publisher(msg_type, topic, queue_size)
+            from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+            qos = QoSProfile(
+                depth=queue_size,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL if transient_local else DurabilityPolicy.VOLATILE,
+            )
+            return self._node.create_publisher(msg_type, topic, qos)
         else:
-            return rospy.Publisher(topic, msg_type, queue_size=queue_size)
+            kwargs = {'queue_size': queue_size}
+            if transient_local:
+                kwargs['latch'] = True
+            return rospy.Publisher(topic, msg_type, **kwargs)
 
     def create_subscriber(self, msg_type, topic, callback, queue_size=10):
         if _ROS2:

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>turtle</name>
+  <name>Robot-Planner</name>
   <version>0.0.0</version>
   <description>
     Robot-Planner: RRT* global path planning + PID trajectory tracking.
@@ -10,8 +10,9 @@
   <maintainer email="sysuceo@todo.todo">aditya</maintainer>
   <license>MIT</license>
 
-  <!-- Build tool: ament_cmake for colcon. catkin_make discovers packages by convention. -->
+  <!-- Build tool: ament_cmake (ROS2) + catkin (ROS1). Colcon uses <export><build_type>. -->
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>catkin</buildtool_depend>
 
   <!-- Dependencies available on BOTH ROS1 and ROS2 -->
   <depend>nav_msgs</depend>
@@ -26,6 +27,5 @@
   <!--   ROS2: rclcpp, rclpy  (find_package in ament branch) -->
 
   <export>
-    <build_type>ament_cmake</build_type>
   </export>
 </package>

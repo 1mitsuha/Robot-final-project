@@ -12,8 +12,8 @@
     <arg name="debug" value="false"/>
   </include>
 
-  <param name="pgm_path" value="$(find turtle)/maps/gazebo_map.pgm" />
-  <param name="yaml_path" value="$(find turtle)/maps/gazebo_map.yaml" />
+  <param name="pgm_path" value="$(find Robot-Planner)/maps/gazebo_map.pgm" />
+  <param name="yaml_path" value="$(find Robot-Planner)/maps/gazebo_map.yaml" />
 
   <!-- 障碍物生成：等 Gazebo 就绪后启动（延迟 15 秒） -->
   <node
@@ -40,12 +40,12 @@
 
   <!-- 地图服务：等障碍物全部生成后再加载（延迟 30 秒） -->
   <node pkg="map_server" type="map_server" name="map_server"
-    args="$(find turtle)/maps/gazebo_map.yaml"
+    args="$(find Robot-Planner)/maps/gazebo_map.yaml"
     launch-prefix="bash -c 'sleep 30; $0 $@'"  />
 
-  <arg name="map_file" default="$(find turtle)/maps/gazebo_map.yaml"/>
-  <node pkg="turtle" name="planner" type="planner.py" args="$(arg map_file)" output="screen" />
-  <node pkg="turtle" name="controller" type="controller.py" output="screen" />
+  <arg name="map_file" default="$(find Robot-Planner)/maps/gazebo_map.yaml"/>
+  <node pkg="Robot-Planner" name="planner" type="planner.py" args="$(arg map_file)" output="screen" />
+  <node pkg="Robot-Planner" name="controller" type="controller.py" output="screen" />
 
   <node name="rviz" pkg="rviz" type="rviz"
         args="-d $(find random_map_generator)/final.rviz" />

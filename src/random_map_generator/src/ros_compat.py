@@ -197,11 +197,20 @@ class CompatNode:
             rospy.sleep(duration_sec)
 
     # -- publishers / subscribers -------------------------------------------
-    def create_publisher(self, msg_type, topic, queue_size=10):
+    def create_publisher(self, msg_type, topic, queue_size=10, transient_local=False):
         if _ROS2:
-            return self._node.create_publisher(msg_type, topic, queue_size)
+            from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+            qos = QoSProfile(
+                depth=queue_size,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL if transient_local else DurabilityPolicy.VOLATILE,
+            )
+            return self._node.create_publisher(msg_type, topic, qos)
         else:
-            return rospy.Publisher(topic, msg_type, queue_size=queue_size)
+            kwargs = {'queue_size': queue_size}
+            if transient_local:
+                kwargs['latch'] = True
+            return rospy.Publisher(topic, msg_type, **kwargs)
 
     def create_subscriber(self, msg_type, topic, callback, queue_size=10):
         if _ROS2:
@@ -337,15 +346,30 @@ class CompatNode:
 
 
 class _Ros2Rate:
-    """ROS2 Rate wrapper that also spins callbacks (mimics ROS1's rospy.Rate)."""
+    """ROS2 Rate wrapper that also spins callbacks (mimics ROS1's rospy.Rate).
+
+    IMPORTANT: We do NOT use node.create_rate() / Rate.sleep() here, because
+    Rate.sleep() blocks on a threading.Event that is only set by a ROS2 Timer
+    callback — which requires the executor to be spinning.  That creates a
+    chicken-and-egg deadlock when the same thread is responsible for both
+    spinning and sleeping.  Instead we spin the executor in a tight loop for
+    the duration of one period, which guarantees that timers and subscriptions
+    are serviced promptly.
+    """
     def __init__(self, node, hz):
         self._node = node
-        self._rate = node.create_rate(hz)
+        self._executor = rclpy.executors.SingleThreadedExecutor()
+        self._executor.add_node(node)
+        self._period_sec = 1.0 / hz
 
     def sleep(self):
-        # Spin once to process pending callbacks, then sleep
-        rclpy.spin_once(self._node, timeout_sec=0)
-        self._rate.sleep()
+        # Spin the executor for one period, processing every ready callback.
+        # This naturally approximates the desired rate while keeping all
+        # subscriptions, timers and services alive.
+        import time
+        deadline = time.monotonic() + self._period_sec
+        while time.monotonic() < deadline:
+            self._executor.spin_once(timeout_sec=0.001)
 
 
 class _RospyLogger:
@@ -371,8 +395,11 @@ def spin(node):
     global _active_node_ref
     _active_node_ref = node
     if _ROS2:
+        executor = rclpy.executors.SingleThreadedExecutor()
+        executor.add_node(node._node)
         while rclpy.ok():
-            rclpy.spin_once(node._node, timeout_sec=0.1)
+            executor.spin_once(timeout_sec=0.1)
+        executor.remove_node(node._node)
     else:
         rospy.spin()
 

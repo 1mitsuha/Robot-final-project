@@ -52,4 +52,4 @@ echo "  启动后用 RViz2 的 2D Nav Goal 设置目标点"
 echo "=============================================="
 echo ""
 
-ros2 launch turtle obs_world_ros2.launch.py
+ros2 launch Robot-Planner obs_world_ros2.launch.py

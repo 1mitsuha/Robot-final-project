@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  ros-noetic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: ros-noetic:full
+    container_name: ros-noetic-sim
+    hostname: ros-docker
+    # 交互模式
+    stdin_open: true
+    tty: true
+    # 网络
+    network_mode: host
+    # 环境变量（图形界面转发）
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+    # 挂载卷
+    volumes:
+      # X11 图形转发
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # 工作空间挂载
+      - ../src:/home/rosuser/catkin_ws/src:rw
+      # 设备访问
+      - /dev/dri:/dev/dri:rw
+    # 设备
+    devices:
+      - /dev/dri:/dev/dri
+    # 启动命令
+    command: /bin/bash

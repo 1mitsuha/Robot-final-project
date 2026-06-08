@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.5)
 
 if(DEFINED ENV{ROS_VERSION} AND "$ENV{ROS_VERSION}" STREQUAL "2")
   # ===================== ROS2 build =====================
-  project(turtle)
+  project(Robot-Planner)
 
   find_package(ament_cmake REQUIRED)
   find_package(ament_cmake_python REQUIRED)
@@ -45,14 +45,14 @@ if(DEFINED ENV{ROS_VERSION} AND "$ENV{ROS_VERSION}" STREQUAL "2")
   ament_package()
 
 else()
-  # ===================== ROS1 build =====================
+  # ===================== ROS1 build (pure catkin, no ament_cmake) =====================
   find_package(catkin REQUIRED COMPONENTS
     roscpp
     rospy
     std_msgs
   )
 
-  project(turtle)
+  project(Robot-Planner)
 
   catkin_package(
   #  INCLUDE_DIRS include
@@ -68,6 +68,16 @@ else()
   catkin_install_python(PROGRAMS
     scripts/planner.py scripts/controller.py scripts/gazebo_to_tf.py scripts/map_publisher.py scripts/utils.py scripts/ros_compat.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+
+  # Install launch and maps for colcon discovery
+  install(DIRECTORY
+    launch/
+    DESTINATION share/${PROJECT_NAME}/launch
+  )
+  install(DIRECTORY
+    maps/
+    DESTINATION share/${PROJECT_NAME}/maps
   )
 
 endif()
