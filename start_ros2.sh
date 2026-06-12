@@ -39,6 +39,11 @@ if [ -d install ]; then
 fi
 colcon build --symlink-install 2>&1 | tail -5
 source install/setup.bash
+# colcon 只设 CMAKE_PREFIX_PATH，但 ros2 launch 依赖 AMENT_PREFIX_PATH 找包
+for pkg_dir in "$SCRIPT_DIR"/install/*/; do
+    [ -d "${pkg_dir}share/ament_index" ] || continue
+    export AMENT_PREFIX_PATH="${pkg_dir%/}:$AMENT_PREFIX_PATH"
+done
 echo "  ✓ 编译完成"
 
 # 4. 启动仿真

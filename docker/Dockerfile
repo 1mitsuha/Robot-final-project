@@ -58,7 +58,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ========== 初始化 rosdep ==========
-RUN rosdep init && rosdep update
+# rosdep 在国内可能因 GitHub 访问超时失败，添加重试和容错
+RUN rosdep init 2>/dev/null || true; \
+    for i in 1 2 3; do \
+        echo "rosdep update attempt $i/3..."; \
+        timeout 120 rosdep update 2>&1 && break || \
+        echo "Attempt $i failed, retrying..."; \
+        sleep 3; \
+    done; \
+    echo "rosdep setup done (errors above are non-fatal if packages already installed)"
 
 # ========== 创建普通用户（避免 root 运行图形界面） ==========
 ARG USER=rosuser

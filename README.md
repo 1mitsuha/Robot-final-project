@@ -185,15 +185,12 @@ pip3 install numpy pillow pyyaml
 export TURTLEBOT3_MODEL=waffle
 source /opt/ros/noetic/setup.bash
 
-# 2. 安装依赖
-cd final_project
-sudo apt update && sudo apt install -y python3-catkin-tools ros-noetic-map-server
-
-# 3. 编译（必须用 catkin build，不能用 catkin_make）
+# 2. 编译（必须用 catkin build，不能用 catkin_make）
+cd Robot-final-project
 catkin build
 source devel/setup.bash
 
-# 4. 启动仿真
+# 3. 启动仿真
 roslaunch Robot-Planner obs_world.launch
 ```
 
@@ -208,16 +205,13 @@ roslaunch Robot-Planner obs_world.launch
 export TURTLEBOT3_MODEL=waffle
 source /opt/ros/humble/setup.bash
 
-# 2. 安装依赖
-cd final_project
-rosdep install -i --from-path src --rosdistro humble -y
-
-# 3. 编译
+# 2. 编译
+cd Robot-final-project
 colcon build --symlink-install
 source install/setup.bash
 
-# 4. 启动仿真
-ros2 launch Robot-Planner obs_world_ros2.launch.py
+# 直接使用一键启动脚本
+bash start_ros2.sh
 ```
 
 启动后（两种 ROS 版本操作相同）：
